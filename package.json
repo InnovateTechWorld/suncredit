@@ -8,7 +8,9 @@
     "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
     "reseed": "node --disable-warning=ExperimentalWarning -e \"import('./server/seed/seed.js').then(m=>m.reseed({})).then(s=>{console.log(JSON.stringify(s,null,1));process.exit(0)})\"",
     "test": "node --disable-warning=ExperimentalWarning --test tests/*.test.js",
-    "sunbox": "node --disable-warning=ExperimentalWarning scripts/sunbox.js"
+    "sunbox": "node --disable-warning=ExperimentalWarning scripts/sunbox.js",
+    "deploy": "wrangler deploy",
+    "deploy:dry": "wrangler deploy --dry-run --outdir .wrangler/dry"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.2.10",
@@ -16,5 +18,9 @@
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "express": "^5.2.1",
     "pdfkit": "^0.20.2"
+  },
+  "devDependencies": {
+    "@cloudflare/containers": "^0.3.7",
+    "wrangler": "^4.160.0"
   }
 }

@@ -1,5 +1,8 @@
 // Tunable numbers. Everything marked (config) in the brief lives here so it can be checked with a mentor.
+import crypto from 'node:crypto';
 const env = process.env;
+const prod = env.NODE_ENV === 'production';
+const rand = () => crypto.randomBytes(24).toString('hex'); // production without a configured key gets a random one at boot
 const num = (k, d) => (env[k] !== undefined && env[k] !== '' ? Number(env[k]) : d);
 
 export const config = {
@@ -10,9 +13,9 @@ export const config = {
   sessionHours: num('SESSION_HOURS', 8),
   demoLoginHints: env.DEMO_LOGIN_HINTS !== '0',
   seedPassword: env.SEED_PASSWORD || 'SunCredit!2026',
-  webhookSecret: env.WEBHOOK_SECRET || 'local-webhook-secret-change-me',
+  webhookSecret: env.WEBHOOK_SECRET || (prod ? rand() : 'local-webhook-secret-change-me'),
   webhookToleranceSec: 300,
-  deviceMasterKey: env.DEVICE_MASTER_KEY || 'local-device-master-key-change-me',
+  deviceMasterKey: env.DEVICE_MASTER_KEY || (prod ? rand() : 'local-device-master-key-change-me'),
   device: { maxReadings: 168, maxBodyBytes: 256 * 1024, toleranceSec: 300, ratePerMin: 120, driftRoundMin: 5 },
 
   calc: {
