@@ -1,26 +1,31 @@
 {
-  // SunCredit on Cloudflare: a Worker in front of one Container running the Node app.
-  // Needs a Workers Paid plan (Containers) and Docker running locally when you deploy.
+  // SunCredit on plain Cloudflare Workers: a Worker, one Durable Object that runs the app, and static assets.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "suncredit",
   "main": "worker/index.js",
   "compatibility_date": "2025-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  "containers": [
-    {
-      "class_name": "SunCreditContainer",
-      "image": "./Dockerfile",
-      "max_instances": 1,
-      "instance_type": "basic"
-    }
-  ],
-  "durable_objects": {
-    "bindings": [{ "class_name": "SunCreditContainer", "name": "SUNCREDIT" }]
+  "build": { "command": "node scripts/build-assets.js" },
+  "assets": {
+    "directory": ".build/assets",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/device/*", "/webhooks/*", "/healthz"]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SunCreditContainer"] }],
+  "durable_objects": { "bindings": [{ "name": "SUNCREDIT", "class_name": "SunCreditApp" }] },
+  // v1 is the empty container-based class that a first attempt left on this account. v2 renames it in place to the app's
+  // class (a delete would be refused while the live version still binds to it). A fresh account would run both in order.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SunCreditContainer"] },
+    { "tag": "v2", "renamed_classes": [{ "from": "SunCreditContainer", "to": "SunCreditApp" }] }
+  ],
   "vars": {
-    // "1" lists the seeded demo accounts on the sign-in page. Set "0" to hide them.
+    // "1" lists the seeded accounts on the sign-in page so testers can try every role. Set "0" to hide them.
     "DEMO_LOGIN_HINTS": "1"
   }
+  // Optional: also save snapshots to D1 (otherwise Durable Object storage is used). Create it first with
+  //   npx wrangler d1 create suncredit
+  // then uncomment this with the database_id it prints:
+  // "d1_databases": [{ "binding": "DB", "database_name": "suncredit", "database_id": "<id>" }]
 }

@@ -62,6 +62,7 @@ export function csrfGuard(req, _res, next) {
 const buckets = new Map();
 export function rateLimit(keyFn, max, windowSec, message) {
   return (req, _res, next) => {
+    if (buckets.size > 500) sweep();
     const key = keyFn(req); const now = Date.now();
     const b = buckets.get(key) || { n: 0, reset: now + windowSec * 1000 };
     if (now > b.reset) { b.n = 0; b.reset = now + windowSec * 1000; }
@@ -70,4 +71,6 @@ export function rateLimit(keyFn, max, windowSec, message) {
     next();
   };
 }
-setInterval(() => { const n = Date.now(); for (const [k, b] of buckets) if (n > b.reset) buckets.delete(k); }, 60000).unref();
+// Old rate-limit windows are swept on a timer on Node. Workers cannot start timers at load, so they are swept as they are read.
+const sweep = () => { const n = Date.now(); for (const [k, b] of buckets) if (n > b.reset) buckets.delete(k); };
+if (globalThis.__SC_RUNTIME__ !== 'workers') setInterval(sweep, 60000).unref?.();

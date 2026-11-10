@@ -10,14 +10,17 @@
     "test": "node --disable-warning=ExperimentalWarning --test tests/*.test.js",
     "sunbox": "node --disable-warning=ExperimentalWarning scripts/sunbox.js",
     "deploy": "wrangler deploy",
-    "deploy:dry": "wrangler deploy --dry-run --outdir .wrangler/dry"
+    "deploy:dry": "wrangler deploy --dry-run --outdir .wrangler/dry",
+    "test:sqljs": "DB_DRIVER=sqljs node --disable-warning=ExperimentalWarning --test tests/*.test.js",
+    "smoke": "node scripts/smoke.mjs",
+    "dev:worker": "wrangler dev"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.2.10",
     "@fontsource-variable/figtree": "^5.2.10",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "express": "^5.2.1",
-    "pdfkit": "^0.20.2"
+    "sql.js": "^1.16.0"
   },
   "devDependencies": {
     "@cloudflare/containers": "^0.3.7",

@@ -8,3 +8,4 @@ data/
 .impeccable/
 *.log
 .DS_Store
+.build/

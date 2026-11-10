@@ -3,11 +3,13 @@ import crypto from 'node:crypto';
 const env = process.env;
 const prod = env.NODE_ENV === 'production';
 const rand = () => crypto.randomBytes(24).toString('hex'); // production without a configured key gets a random one at boot
+// Only used by the node:sqlite driver. Bundles for Workers have no file URL, so fall back instead of throwing.
+const defaultDbPath = () => { try { return new URL('../data/suncredit.db', import.meta.url).pathname; } catch { return '/data/suncredit.db'; } };
 const num = (k, d) => (env[k] !== undefined && env[k] !== '' ? Number(env[k]) : d);
 
 export const config = {
   port: num('PORT', 3000),
-  dbPath: env.DB_PATH || new URL('../data/suncredit.db', import.meta.url).pathname,
+  dbPath: env.DB_PATH || defaultDbPath(),
   adapterMode: (env.ADAPTER_MODE || 'mock').toLowerCase(), // mock | sandbox
   gatewayKey: env.GATEWAY_KEY || '', // never logged, never stored
   sessionHours: num('SESSION_HOURS', 8),

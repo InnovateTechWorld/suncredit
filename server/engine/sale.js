@@ -3,6 +3,7 @@ import { q, tx, audit, nowIso, getSetting } from '../db.js';
 import { config } from '../config.js';
 import { payments, registry, AdapterError } from '../adapters/index.js';
 import { friendly } from '../adapters/errors.js';
+import { setWebhookSink } from '../adapters/mock.js';
 import { bad, conflict, notFound, rid, splitProportional, parseJson } from '../util.js';
 import { notify } from './claims.js';
 
@@ -307,6 +308,8 @@ export function receiveWebhook(rawBody, headers) {
   setImmediate(() => processWebhook(ev).catch((e) => q.run('UPDATE webhook_events SET error=? WHERE event_id=?', String(e.message).slice(0, 200), ev.id)));
   return { status: 200, body: { received: true } };
 }
+
+setWebhookSink((raw, headers) => receiveWebhook(raw, headers));
 
 async function processWebhook(ev) {
   if (ev.type.startsWith('charge.')) {

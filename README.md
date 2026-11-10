@@ -7,11 +7,34 @@ Carbon credits for small Nigerian solar sites that replace diesel generators. Lo
 ```bash
 npm install
 npm start          # http://localhost:3000, seeds itself on first start
-npm test           # 55 end-to-end checks against throwaway databases
+npm test           # 63 checks against throwaway databases
+npm run test:sqljs # the same 63 on the WebAssembly database used on Cloudflare
 npm run reseed     # rebuild all data (also available to the admin in the UI)
 ```
 
-Stack: Node 24, Express 5, built-in `node:sqlite` (one file in `data/`), a no-build ES-module front end, PDFKit for certificates.
+Stack: Node 24, Express 5, SQLite (the built-in `node:sqlite` file in `data/`, or SQLite compiled to WebAssembly on Cloudflare), a no-build ES-module front end, and a small built-in PDF writer for certificates.
+
+## Hosting: where the data lives
+
+The same code runs three ways. The storage engine is chosen at start-up and everything else is identical.
+
+| Where | Storage | Survives a restart? |
+|---|---|---|
+| Node on any host (`npm start`) | `node:sqlite`, a file at `DB_PATH` (default `data/suncredit.db`) | Yes |
+| Node with `DB_DRIVER=sqljs` (or `memory`) | SQLite in memory, no file | No, it reseeds |
+| Cloudflare Workers | SQLite compiled to WebAssembly (sql.js) inside one Durable Object, saved as snapshots | Yes, see below |
+
+On Workers the snapshot goes to the best store available: **D1** if a binding named `DB` exists, otherwise the **Durable Object's own storage** (the default, no extra setup), otherwise **memory only** (it still works and reseeds if the instance is recycled). Snapshots are saved a couple of seconds after any change, split into chunks, and checked with a full-byte checksum when loaded; a torn or damaged snapshot is ignored and the app reseeds rather than trusting it. D1 is used for the snapshot, not for queries, because the app's data layer is synchronous and D1 is async.
+
+## Deploy to Cloudflare
+
+```bash
+npm install
+npm run deploy      # builds the assets, then wrangler deploy
+npm run smoke -- https://<your-worker>.workers.dev   # 32 live checks
+```
+
+`wrangler.jsonc` defines a Worker, one Durable Object that runs the app, and static assets. It needs no paid Containers feature. To also save to D1, run `npx wrangler d1 create suncredit` and uncomment the `d1_databases` block. Set `DEMO_LOGIN_HINTS` to `"0"` to stop the sign-in page listing the seeded accounts. Secrets (`SEED_PASSWORD`, `WEBHOOK_SECRET`, `DEVICE_MASTER_KEY`) go in with `npx wrangler secret put`. `wrangler dev` runs the same thing locally. The container-based setup that needs a paid plan is kept in `deploy/containers/` along with the `Dockerfile` for other Docker hosts.
 
 ## Accounts (password `SunCredit!2026`, set `SEED_PASSWORD` to change)
 

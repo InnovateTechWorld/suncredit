@@ -1,5 +1,5 @@
 import express from 'express';
-import PDFDocument from 'pdfkit';
+import { certificatePdf } from '../pdf.js';
 import { q, audit } from '../db.js';
 import { config } from '../config.js';
 import { requireRole } from '../auth.js';
@@ -71,19 +71,5 @@ router.get('/orders/:id/certificate.pdf', wrap((req, res) => {
   const credits = q.all('SELECT serial,origin_month,region FROM credits WHERE order_id=? ORDER BY id', o.id);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${cert.code}.pdf"`);
-  const doc = new PDFDocument({ size: 'A4', margin: 56, info: { Title: `Retirement certificate ${cert.code}` } });
-  doc.pipe(res);
-  doc.rect(28, 28, 539, 786).lineWidth(1).strokeColor('#2f4a3a').stroke();
-  doc.fillColor('#1c2a22').font('Helvetica-Bold').fontSize(11).text('SUNCREDIT · NIGERIA SOLAR CARBON REGISTRY', 56, 70, { characterSpacing: 1.5 });
-  doc.font('Helvetica-Bold').fontSize(30).text('Certificate of retirement', 56, 110);
-  doc.font('Helvetica').fontSize(12).fillColor('#44564b').text(`This certifies that ${o.tonnes} tonne${o.tonnes > 1 ? 's' : ''} of CO₂ avoided by solar systems replacing diesel generators in Nigeria have been permanently retired.`, 56, 164, { width: 480, lineGap: 4 });
-  doc.moveDown(2).font('Helvetica-Bold').fontSize(11).fillColor('#1c2a22').text(`Certificate  ${cert.code}`);
-  doc.font('Helvetica').text(`Issued  ${new Date(cert.issued_at).toLocaleString('en-GB', { timeZone: 'Africa/Lagos' })} WAT`);
-  doc.text(`Registry reference  ${cert.registry_ref || '—'}`);
-  doc.moveDown(1.2).font('Helvetica-Bold').text('Retired serial numbers');
-  doc.font('Courier').fontSize(10);
-  for (const c of credits.slice(0, 40)) doc.text(`${c.serial}   ${c.origin_month}   ${c.region}`);
-  if (credits.length > 40) doc.text(`… and ${credits.length - 40} more`);
-  doc.font('Helvetica').fontSize(10).fillColor('#44564b').text(`Verify any serial at /verify/<serial>. No personal data is published.`, 56, 760);
-  doc.end();
+  res.end(Buffer.from(certificatePdf({ code: cert.code, issuedText: `${new Date(cert.issued_at).toLocaleString('en-GB', { timeZone: 'Africa/Lagos' })} WAT`, registryRef: cert.registry_ref, tonnes: o.tonnes, credits })));
 }));

@@ -1,8 +1,7 @@
 // SunBox simulator. Builds the same signed batches a real device would and posts them to /device/ingest over HTTP,
 // so the real endpoint, signature check, replay rules and drop reasons are exercised. Used by the admin page and `npm run sunbox`.
 import { q } from '../db.js';
-import { config } from '../config.js';
-import { deviceKey, signBody } from '../engine/device.js';
+import { deviceKey, signBody, ingestDeviceBatch } from '../engine/device.js';
 import { generateSite } from '../seed/generate.js';
 import { SITES } from '../seed/seed.js';
 import { plantNight } from '../seed/generate.js';
@@ -43,12 +42,12 @@ function makeReadings(site, fromMs, toMs) {
   }, raw: r }));
 }
 
+// Builds the request a real box would send and hands it straight to the ingest logic: same signature check, same rules.
 async function post(serial, rawBody, { key, ts } = {}) {
   const t = ts ?? Date.now();
   const sig = signBody(key ?? deviceKey(serial), t, rawBody);
-  const res = await fetch(`http://127.0.0.1:${config.port}/device/ingest`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-device-id': serial, 'x-timestamp': String(t), 'x-signature': sig }, body: rawBody });
-  let json = null; try { json = await res.json(); } catch { /* not json */ }
-  return { http: res.status, ...json };
+  const r = ingestDeviceBatch(rawBody, { 'x-device-id': serial, 'x-timestamp': String(t), 'x-signature': sig });
+  return { http: r.status, ...r.body };
 }
 
 export function nextSeq(serial) { return (q.get('SELECT MAX(seq) m FROM device_batches WHERE serial=?', serial).m ?? 0) + 1; }

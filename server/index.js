@@ -19,7 +19,8 @@ import { seedIfEmpty } from './seed/seed.js';
 import { autoFeed } from './sunbox/simulator.js';
 import { getSetting } from './db.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const IS_WORKERS = globalThis.__SC_RUNTIME__ === 'workers'; // Workers have no disk: static files come from the assets binding
+const __dirname = IS_WORKERS ? '/' : path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -53,6 +54,7 @@ app.post('/device/ingest', express.raw({ type: '*/*', limit: config.device.maxBo
   res.status(r.status).json(r.body);
 });
 
+app.use((_req, _res, next) => { if (IS_WORKERS) tickIfDue(); next(); });
 app.use('/api', (req, res, next) => (state.resetting ? res.status(503).json({ error: 'resetting', message: 'Data is being reset. Try again in a few seconds.' }) : next()));
 app.use('/api', express.json({ limit: '3mb' }), loadUser, csrfGuard);
 
@@ -98,31 +100,39 @@ app.use('/api/buyer', buyer);
 app.use('/api/admin', admin);
 app.use('/api', (_req, _res, next) => next(notFound('No such endpoint.')));
 
-// Static app. Fonts are served from node_modules so nothing loads from a third party.
-const pub = path.join(__dirname, '..', 'public');
-app.use('/fonts/bricolage', express.static(path.join(__dirname, '..', 'node_modules/@fontsource-variable/bricolage-grotesque/files'), { maxAge: '7d' }));
-app.use('/fonts/figtree', express.static(path.join(__dirname, '..', 'node_modules/@fontsource-variable/figtree/files'), { maxAge: '7d' }));
-app.use('/fonts/plex', express.static(path.join(__dirname, '..', 'node_modules/@fontsource/ibm-plex-mono/files'), { maxAge: '7d' }));
-app.use(express.static(pub, { maxAge: 0, etag: true }));
-app.get(/^\/(?!api|webhooks|device|healthz).*/, (_req, res) => res.sendFile(path.join(pub, 'index.html')));
+if (!IS_WORKERS) {
+  // Static app. Fonts are served from node_modules so nothing loads from a third party.
+  const pub = path.join(__dirname, '..', 'public');
+  app.use('/fonts/bricolage', express.static(path.join(__dirname, '..', 'node_modules/@fontsource-variable/bricolage-grotesque/files'), { maxAge: '7d' }));
+  app.use('/fonts/figtree', express.static(path.join(__dirname, '..', 'node_modules/@fontsource-variable/figtree/files'), { maxAge: '7d' }));
+  app.use('/fonts/plex', express.static(path.join(__dirname, '..', 'node_modules/@fontsource/ibm-plex-mono/files'), { maxAge: '7d' }));
+  app.use(express.static(pub, { maxAge: 0, etag: true }));
+  app.get(/^\/(?!api|webhooks|device|healthz).*/, (_req, res) => res.sendFile(path.join(pub, 'index.html')));
+}
 
 app.use((err, req, res, _next) => {
   if (err instanceof AppError) return res.status(err.status).json({ error: err.code, message: err.message, ...(err.extra || {}) });
   if (err?.type === 'entity.too.large') return res.status(413).json({ error: 'too_large', message: 'That upload is too large.' });
   if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'bad_json', message: 'The request could not be read.' });
-  if (err?.code === 'ERR_SQLITE_ERROR' && /UNIQUE/.test(err.message)) return res.status(409).json({ error: 'duplicate', message: 'That already exists.' });
+  if (/UNIQUE constraint failed/.test(err?.message || '')) return res.status(409).json({ error: 'duplicate', message: 'That already exists.' });
   const f = friendly(err);
   if (f.code !== 'internal') return res.status(f.status).json({ error: f.code, message: f.message });
   console.error('[error]', req.method, req.path, err?.message); // no bodies, no personal data in logs
   res.status(500).json({ error: 'internal', message: 'Something went wrong on our side. Please try again.' });
 });
 
-let lastFeed = 0;
+let lastFeed = 0, lastTick = 0;
 function tick() {
+  lastTick = Date.now();
   if (getSetting('sunbox.auto', '0') === '1' && Date.now() - lastFeed > 55000) { lastFeed = Date.now(); autoFeed().catch(() => {}); }
   try { expireReservations(); expireStaleInfoRequests(); } catch (e) { console.error('[tick]', e.message); }
   runPayouts().catch(() => {});
 }
+
+// Housekeeping runs on a timer on a normal host and on demand (at most every 10 seconds) where timers do not outlive a request.
+export const tickIfDue = () => { if (Date.now() - lastTick > 10000) tick(); };
+
+export async function initApp() { await seedIfEmpty(); await reconcile(); ready = true; }
 
 export async function start(port = config.port) {
   await seedIfEmpty();
@@ -134,5 +144,5 @@ export async function start(port = config.port) {
   return server;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) start();
+if (!IS_WORKERS && process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) start();
 export { app };

@@ -32,13 +32,14 @@ export function signWebhook(body, ts = Date.now()) {
   return { 'x-timestamp': String(ts), 'x-signature': sig };
 }
 
-// The provider calling us back. Goes through our real HTTP endpoint so signature checks are exercised.
+// The provider calling us back. It signs the event exactly as before and hands it to the webhook handler, which verifies the
+// signature, checks the age and de-duplicates. On Workers there is no loopback address to call, so delivery is in-process.
+let sink = null;
+export const setWebhookSink = (fn) => { sink = fn; };
 export function emitWebhook(type, data, delayMs = 350) {
   const event = { id: 'evt_' + rid(8), type, data, created: Date.now() };
   const body = JSON.stringify(event);
-  setTimeout(() => {
-    fetch(`http://127.0.0.1:${config.port}/webhooks/payments`, { method: 'POST', headers: { 'content-type': 'application/json', ...signWebhook(body) }, body }).catch(() => {});
-  }, delayMs);
+  setTimeout(() => { try { sink?.(body, signWebhook(body)); } catch { /* the provider does not retry here */ } }, delayMs);
   return event;
 }
 

@@ -1,11 +1,14 @@
-import { DatabaseSync } from 'node:sqlite';
-import fs from 'node:fs';
-import path from 'node:path';
 import { config } from './config.js';
+import { createDriver } from './store/choose.js';
 
-fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
-export const db = new DatabaseSync(config.dbPath);
-db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+// The storage engine is chosen once: Workers install their own driver first, everything else uses node:sqlite or sql.js.
+const driver = globalThis.__SC_DRIVER__ || await createDriver(config);
+export const storage = driver;
+export const db = {
+  exec: (sql) => driver.exec(sql),
+  prepare: (sql) => ({ all: (...p) => driver.all(sql, p), get: (...p) => driver.get(sql, p), run: (...p) => driver.run(sql, p) }),
+  close: () => driver.close(),
+};
 
 // Energy is stored as integer watt-hours, tonnes as integer kilograms, money as integer kobo.
 // No floats are persisted for anything that gets added up.
