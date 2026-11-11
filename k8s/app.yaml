@@ -12,11 +12,11 @@ spec:
   template:
     metadata: { labels: { app: app } }
     spec:
-      # imagePullSecrets: [{ name: regcred }]   # only if the image is private: kubectl create secret docker-registry regcred ...
+      imagePullSecrets: [{ name: regcred }]
       securityContext: { fsGroup: 1000 }
       containers:
         - name: app
-          image: REGISTRY/suncredit:v1
+          image: ghcr.io/innovatetechworld/suncredit-forge:v2
           ports: [{ containerPort: 8080 }]
           env:
             - { name: ADAPTER_MODE, value: sandbox }

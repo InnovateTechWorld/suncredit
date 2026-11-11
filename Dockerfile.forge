@@ -2,11 +2,14 @@
 #   docker build --platform linux/amd64 -f Dockerfile.forge -t <registry>/suncredit:v1 .
 FROM node:24-slim
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-COPY server ./server
-COPY public ./public
-RUN mkdir -p /data && chown -R node:node /app /data
+RUN chown node:node /app
+COPY --chown=node:node package.json package-lock.json ./
+USER node
+RUN npm ci --omit=dev && npm cache clean --force
+COPY --chown=node:node server ./server
+COPY --chown=node:node public ./public
+USER root
+RUN mkdir -p /data && chown node:node /data
 USER node
 # Adapter modes and every secret come from the Deployment (env + secrets), never from the image.
 ENV NODE_ENV=production PORT=8080 HOST=0.0.0.0 DB_PATH=/data/suncredit.db

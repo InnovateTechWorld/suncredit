@@ -88,13 +88,13 @@ export async function flush() {
         else q.run('UPDATE forge_pool SET batch_id=? WHERE id=?', id, r.id);
         left -= take; kg += share; const [a, z] = monthRange(r.month); from = Math.min(from, a); to = Math.max(to, z);
       }
-      q.run('UPDATE forge_batches SET app_kg=?, period_from=?, period_to=? WHERE id=?', kg, iso(from), iso(to), id);
+      q.run('UPDATE forge_batches SET app_kg=?, period_from=?, period_to=? WHERE id=?', kg, iso(from).slice(0, 10), iso(to).slice(0, 10), id); // the registry wants YYYY-MM-DD
       return id;
     });
     const b = q.get('SELECT * FROM forge_batches WHERE id=?', batchId);
     try {
       const r = await forge('POST', `/carbon/projects/${encodeURIComponent(pid)}/mrv`, { idemKey: b.idem_key, body: merge('measurement', { period: { from: b.period_from, to: b.period_to }, metric: 'energy_generated_kwh', value: Math.round(kwhSubmit * 100) / 100 }) });
-      q.run("UPDATE forge_batches SET measurement_id=?, status='submitted', updated_at=? WHERE id=?", pick(r, 'id', 'mrv_id', 'measurement_id'), nowIso(), batchId);
+      q.run("UPDATE forge_batches SET measurement_id=?, status='submitted', updated_at=? WHERE id=?", pick(r, 'submission_id', 'id', 'mrv_id', 'measurement_id'), nowIso(), batchId);
       audit(null, 'forge.measurement_submitted', 'forge_batch', batchId, { kwh: kwhSubmit, credits_expected: credits });
     } catch (e) {
       if (e.code === 'timeout') { q.run("UPDATE forge_batches SET status='unconfirmed', note='Timed out: check status, never resend.', updated_at=? WHERE id=?", nowIso(), batchId); }
