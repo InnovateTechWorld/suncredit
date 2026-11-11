@@ -16,7 +16,7 @@ spec:
       securityContext: { fsGroup: 1000 }
       containers:
         - name: app
-          image: ghcr.io/innovatetechworld/suncredit-forge:v3
+          image: ghcr.io/innovatetechworld/suncredit-forge:v5
           ports: [{ containerPort: 8080 }]
           env:
             - { name: ADAPTER_MODE, value: sandbox }

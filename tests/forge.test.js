@@ -14,9 +14,9 @@ const BASE = 'http://127.0.0.1:3984';
 const PW = 'SunCredit!2026';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let app, fake, q, bridge;
-const calls = []; const seenKeys = []; const pays = {}; let mrv = null; let transferBody = null;
+let rejectNextCheckout = false; const calls = []; const seenKeys = []; const pays = {}; let mrv = null; let transferBody = null;
 const ok = (res, data, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify({ status: 'success', data, request_id: 'req_1' })); };
-const err = (res, status, code, message) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify({ status: 'error', error: { code, message, field: null }, request_id: 'req_e' })); };
+const err = (res, status, code, message, field = null) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify({ status: 'error', error: { code, message, field }, request_id: 'req_e' })); };
 
 before(async () => {
   fake = http.createServer((req, res) => {
@@ -27,6 +27,7 @@ before(async () => {
       if (p === '/carbon/projects') return ok(res, { id: 'prj_1' }, 201);
       if (p === '/carbon/projects/prj_1/mrv') { mrv = body; return ok(res, { id: 'mrv_1', status: 'pending' }, 201); }
       if (p === '/carbon/mrv/mrv_1') { const c = Math.floor(mrv.value * 0.00053); return ok(res, { id: 'mrv_1', status: 'verified', estimated_tco2e: mrv.value * 0.00053, credits_issued: c, credit_batch_id: 'cb_1', serial_range: ['A1', 'A9'] }); }
+      if (p === '/payments/checkout' && (rejectNextCheckout || !body.customer?.name)) { rejectNextCheckout = false; return err(res, 400, 'INVALID_REQUEST', 'customer.name is required', 'customer.name'); }
       if (p === '/payments/checkout') { pays[body.reference] = { amount: body.amount, paid: false }; return ok(res, { reference: body.reference, payment_url: 'https://pay.example/x', amount: body.amount }, 201); }
       let m = /^\/payments\/(.+)\/simulate-transfer$/.exec(p); if (m) { pays[m[1]].paid = true; return ok(res, { status: 'processing' }); }
       m = /^\/payments\/(.+)\/verify$/.exec(p); if (m) { const x = pays[m[1]]; return ok(res, { reference: m[1], status: x.paid ? 'successful' : 'pending', amount: x.amount, amount_paid: x.paid ? x.amount : 0 }); }
@@ -75,6 +76,23 @@ test('seeded approvals are pooled into ONE registry measurement, verified, and b
   const buyer = await as('buyer1@suncredit.test');
   const m = (await buyer.get('/api/buyer/market')).json;
   assert.equal(m.total, Math.min(m.local_total, batches[0].credits_issued));
+});
+
+test('a checkout the provider rejects (missing customer.name) fails gracefully and the same order can be retried', async () => {
+  const buyer = await as('buyer1@suncredit.test');
+  const before = q.get('SELECT COUNT(*) n FROM orders').n;
+  const capBefore = (await buyer.get('/api/buyer/market')).json.total;
+  rejectNextCheckout = true;
+  const bad = await buyer.req('POST', '/api/buyer/orders', { tonnes: 1 }, { 'idempotency-key': 'forge-retry-0001' });
+  assert.equal(bad.status, 502); assert.equal(bad.json.error, 'payment_not_started');
+  assert.ok(!/customer\.name|INVALID_REQUEST/.test(bad.text), 'no raw provider message reaches the buyer');
+  assert.equal(q.get('SELECT COUNT(*) n FROM orders').n, before, 'no stuck failed order is left behind');
+  assert.equal((await buyer.get('/api/buyer/market')).json.total, capBefore, 'credits were released');
+  assert.match(q.get("SELECT detail_json d FROM audit_log WHERE action='order.checkout_failed' ORDER BY id DESC LIMIT 1").d, /customer\.name/, 'the field is in the audit log');
+  const again = await buyer.req('POST', '/api/buyer/orders', { tonnes: 1 }, { 'idempotency-key': 'forge-retry-0001' });
+  assert.equal(again.status, 201); assert.ok(again.json.order.payment_ref);
+  assert.ok(calls.filter((c) => c === 'POST /payments/checkout').length >= 2);
+  (await import('../server/engine/sale.js')).releaseOrder(again.json.order.id, 'failed', 'test cleanup'); // keep the one credit for the next test
 });
 
 test('a paid order is verified with the provider, retired in the registry, and paid out with fees read from responses', async () => {

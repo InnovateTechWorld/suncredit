@@ -50,10 +50,16 @@ export async function createOrder(buyer, tonnesRaw, idemKey) {
     return q.get('SELECT * FROM orders WHERE id=?', id);
   });
   try {
-    const co = await payments.createCheckout({ order_ref: `ORD-${order.id}`, amount_kobo: order.total_kobo, email: buyer.email }, `checkout-${order.idem_key}`);
+    const co = await payments.createCheckout({ order_ref: `ORD-${order.id}`, amount_kobo: order.total_kobo, email: buyer.email, name: buyer.name }, `checkout-${order.idem_key}-${rid(5)}`); // fresh key per attempt: a rejected attempt must not poison a retry
     q.run("UPDATE orders SET payment_ref=?, updated_at=? WHERE id=?", co.checkout_ref, nowIso(), order.id);
   } catch (e) {
-    releaseOrder(order.id, 'failed', friendly(e).message);
+    // The payment never started, so there is nothing to show as a failed order. Free the credits and forget the order, which also
+    // lets the buyer retry with the same Idempotency-Key. The real cause stays in the audit log (code and field, no body).
+    tx(() => {
+      q.run("UPDATE credits SET status='issued', order_id=NULL WHERE order_id=? AND status='reserved'", order.id);
+      q.run("DELETE FROM orders WHERE id=? AND payment_ref IS NULL", order.id);
+      audit(buyer, 'order.checkout_failed', 'order', order.id, { code: e.code, field: e.field || null, request_id: e.requestId || null });
+    });
     throw e;
   }
   return q.get('SELECT * FROM orders WHERE id=?', order.id);

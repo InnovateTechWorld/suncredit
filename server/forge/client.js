@@ -42,9 +42,11 @@ export async function forge(method, path, { body, idemKey, extraHeaders, timeout
     if (res.status === 504) throw new AdapterError(504, 'timeout', 'The sandbox gateway timed out: outcome unknown. Query the status instead of resending.');
     if (res.ok && json.status !== 'error') return json.data ?? json;
     const err = json.error || {};
-    lastError.at = new Date().toISOString(); lastError.message = `${method} ${path} ${res.status} ${err.code || ''} ${err.message || ''}`.trim().slice(0, 300);
+    lastError.at = new Date().toISOString(); lastError.message = `${method} ${path} ${res.status} ${err.code || ''} ${err.message || ''}${err.field ? ` (field: ${err.field})` : ''}`.trim().slice(0, 300);
     console.error(`[forge] ${method} ${path} -> ${res.status} ${err.code || ''} field=${err.field || '-'} request_id=${json.request_id || '-'}`);
-    throw new AdapterError(res.status, err.code || 'adapter_error', err.message || 'The sandbox request failed.' + (err.field ? ` (field: ${err.field})` : ''));
+    const ae = new AdapterError(res.status, err.code || 'adapter_error', err.message || 'The sandbox request failed.');
+    ae.field = err.field || null; ae.requestId = json.request_id || null;
+    throw ae;
   }
 }
 

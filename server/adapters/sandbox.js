@@ -28,10 +28,10 @@ export const sandboxRegistry = {
 };
 
 export const sandboxPayments = {
-  async createCheckout({ order_ref, amount_kobo, email }, idemKey) {
+  async createCheckout({ order_ref, amount_kobo, email, name }, idemKey) {
     const reference = `${order_ref}-${bridge.bootTag()}`; // unique across restarts (the sandbox remembers references)
     const r = await forge('POST', '/payments/checkout', { idemKey, body: merge('checkout', {
-      merchant_id: F.merchantId, amount: toNaira(amount_kobo), currency: 'NGN', reference, description: 'SunCredit carbon credits', customer: { email },
+      merchant_id: F.merchantId, amount: toNaira(amount_kobo), currency: 'NGN', reference, description: 'SunCredit carbon credits', customer: { name: name || 'SunCredit buyer', email },
     }) });
     const ref = pick(r, 'reference', 'payment_reference', 'id') || reference;
     const url = pick(r, 'payment_url', 'checkout_url', 'url') || null;
