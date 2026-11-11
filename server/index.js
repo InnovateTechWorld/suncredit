@@ -113,8 +113,11 @@ if (!IS_WORKERS) {
   app.use('/fonts/bricolage', express.static(path.join(__dirname, '..', 'node_modules/@fontsource-variable/bricolage-grotesque/files'), { maxAge: '7d' }));
   app.use('/fonts/figtree', express.static(path.join(__dirname, '..', 'node_modules/@fontsource-variable/figtree/files'), { maxAge: '7d' }));
   app.use('/fonts/plex', express.static(path.join(__dirname, '..', 'node_modules/@fontsource/ibm-plex-mono/files'), { maxAge: '7d' }));
-  app.use(express.static(pub, { maxAge: 0, etag: true }));
-  app.get(/^\/(?!api|webhooks|hooks|device|healthz).*/, (_req, res) => res.sendFile(path.join(pub, 'index.html')));
+  // Pages, scripts and styles must never be served stale: a proxy or browser that keeps an old
+  // copy would show people the previous version after a deploy.
+  const noStore = (res) => res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  app.use(express.static(pub, { maxAge: 0, etag: true, setHeaders: (res, file) => { if (/\.(?:html|js|css)$/i.test(file)) noStore(res); } }));
+  app.get(/^\/(?!api|webhooks|hooks|device|healthz).*/, (_req, res) => { noStore(res); res.sendFile(path.join(pub, 'index.html')); });
 }
 
 app.use((err, req, res, _next) => {
