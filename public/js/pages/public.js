@@ -2,32 +2,22 @@ import { get } from '../api.js';
 import { html, mount, $, icon, dateWat, monthLabel, esc, sparkArc, raw, tonnes as fmtT, countUp, runCountUps, empty, skeleton, copyText } from '../lib.js';
 import { setTitle } from '../app.js';
 
-const lookupForm = (value = '') => html`<form class="lookup" id="lk" role="search" novalidate><label class="sr" for="serial">Certificate serial number</label><input id="serial" type="search" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="NG-SOL-2026-000001" value="${value}" aria-describedby="lkerr"><button class="btn" type="submit">${icon('search')}Look up</button></form><div class="err" id="lkerr" style="color:var(--bad);font-weight:550;min-height:1.4em" role="alert"></div>`;
+const lookupForm = (value = '', sfx = '') => html`<form class="lookup" id="lk${sfx}" role="search" novalidate><label class="sr" for="serial${sfx}">Certificate serial number</label><input id="serial${sfx}" type="search" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="NG-SOL-2026-000001" value="${value}" aria-describedby="lkerr${sfx}"><button class="btn" type="submit">${icon('search')}Look up</button></form><div class="err" id="lkerr${sfx}" style="color:var(--bad);font-weight:550;min-height:1.4em" role="alert"></div>`;
 
-function bindLookup(root, navigate) {
-  const f = $('#lk', root); if (!f) return;
+function bindLookup(root, navigate, sfx = '') {
+  const f = $('#lk' + sfx, root); if (!f) return;
   f.addEventListener('submit', (e) => {
     e.preventDefault();
-    const v = $('#serial', f).value.trim().toUpperCase();
-    const err = $('#lkerr', root);
-    if (!/^NG-SOL-\d{4}-\d{6}$/.test(v)) { err.textContent = 'A serial looks like NG-SOL-2026-000001: three letters, a year, then six digits.'; $('#serial', f).focus(); return; }
+    const v = $('#serial' + sfx, f).value.trim().toUpperCase();
+    const err = $('#lkerr' + sfx, root);
+    if (!/^NG-SOL-\d{4}-\d{6}$/.test(v)) { err.textContent = 'A serial looks like NG-SOL-2026-000001: three letters, a year, then six digits.'; $('#serial' + sfx, f).focus(); return; }
     err.textContent = ''; navigate('/verify/' + v);
   });
 }
 
-export async function landing({ root, navigate }) {
-  setTitle('');
-  let stats = null; try { stats = await get('/public/stats'); } catch { /* optional */ }
-  mount(root, html`<div class="landing view"><section class="stack s6">
-      <h1 style="font-size:clamp(2.2rem,1.4rem+3.6vw,4rem);max-width:14ch">Sunlight that replaced a generator, on the record.</h1>
-      <p class="muted" style="font-size:1.15rem">SunCredit turns the diesel hours that solar replaced in Nigerian homes and businesses into verified, whole-tonne carbon credits. Anyone can check a certificate here.</p>
-      <div class="stack s2"><b>Check a certificate</b>${lookupForm()}</div>
-      <div class="row wrap"><a class="btn" href="/login">Sign in</a><span class="muted">Owners, verifiers and buyers sign in. The certificate lookup never needs it.</span></div></section>
-    <section class="panel sunledger" style="min-height:360px"><div class="arc">${sparkArc}</div>
-      <div class="stack s6" style="position:relative;z-index:1;margin-top:90px">
-        ${stats ? html`<div class="sentence">So far, <span class="big"><span data-count="${stats.retired_tonnes}" data-dec="0">0</span><small>tonnes</small></span> of CO₂ avoided have been retired by buyers, from <span class="big">${stats.sites}<small>sites</small></span> across ${stats.states} states.</div>` : html`<div class="sentence">Every credit is one tonne, traceable to the sites that earned it.</div>`}
-        <p class="muted" style="font-size:.92rem">Credits carry a serial like <span class="code">NG-SOL-2026-000123</span>. The public page shows the month of origin, the region and the status. It never shows who owns it.</p></div></section></div>`);
-  bindLookup(root, navigate); runCountUps(root);
+export async function landing(ctx) {
+  const { render } = await import('./landing.js');
+  return render(ctx, { lookupForm, bindLookup });
 }
 
 export async function verify({ root, params, navigate }) {
