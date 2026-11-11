@@ -59,7 +59,7 @@ export async function render({ root, navigate }, { lookupForm, bindLookup }) {
   <section class="lp-hero" aria-labelledby="lp-h1">
     <div class="lp-copy stack s6">
       <p class="lp-eyebrow"><span class="dot" aria-hidden="true"></span>Nigeria’s solar carbon registry</p>
-      <h1 id="lp-h1">Sunlight that replaced a generator, on the record.</h1>
+      <h1 id="lp-h1">Earn money from your solar power.</h1>
       <p class="lp-lede">SunCredit turns the petrol and diesel that solar saved in Nigerian homes and shops into verified carbon credits. Owners are paid in naira. Companies buy the credits. A verifier checks the data.</p>
       <div class="stack s2 lp-check"><b id="lp-cert-h">Check a certificate</b>${lookupForm('', '-hero')}<p class="faint lp-hint">No sign-in needed. A serial looks like <span class="code">NG-SOL-2026-000123</span>.</p></div>
       <div class="row wrap lp-cta"><a class="btn" href="/login">Sign in</a><button class="btn ghost" type="button" data-scroll="lp-how">${icon('arrow')}See how it works</button></div>
