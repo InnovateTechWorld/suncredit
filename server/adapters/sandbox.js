@@ -5,11 +5,22 @@
 import { config } from '../config.js';
 import { q } from '../db.js';
 import { AdapterError } from './errors.js';
+import { sha256 } from '../util.js';
 import { forge, merge, pick, toNaira, toKobo } from '../forge/client.js';
 import { takeScenario } from '../forge/scenarios.js';
 import * as bridge from '../forge/bridge.js';
 
 const F = config.forge;
+// The sandbox only knows three beneficiary accounts (6-digit bank codes). SunCredit's seeded and owner-entered accounts use its own
+// demo banks, so in sandbox mode any account that is not one of these is mapped, deterministically, onto one of them.
+// Real banks and real account numbers are never used.
+const TEST_ACCOUNTS = [['000013', '0123987001'], ['000015', '0123987005'], ['000016', '0123987006']];
+export function sandboxBeneficiary(bank, account) {
+  const exact = TEST_ACCOUNTS.find(([b, a]) => b === String(bank) && a === String(account));
+  if (exact) return { bank: exact[0], account: exact[1] };
+  const [b, a] = TEST_ACCOUNTS[parseInt(sha256(String(account)).slice(0, 6), 16) % TEST_ACCOUNTS.length];
+  return { bank: b, account: a };
+}
 const mapPay = (s) => { s = String(s || '').toLowerCase(); return ['success', 'successful', 'paid', 'completed'].includes(s) ? 'success' : ['failed', 'declined', 'abandoned'].includes(s) ? 'failed' : s === 'reversed' ? 'reversed' : 'pending'; };
 const mapTransfer = (s) => { s = String(s || '').toLowerCase(); return ['successful', 'success', 'completed'].includes(s) ? 'successful' : s === 'failed' ? 'failed' : s === 'reversed' ? 'reversed' : 'pending'; };
 
@@ -55,7 +66,7 @@ export const sandboxPayments = {
   async nameEnquiry({ bank_code, account_number }) {
     if (!/^\d{10}$/.test(String(account_number || ''))) throw new AdapterError(422, 'invalid_account', 'Account numbers have 10 digits.');
     try {
-      const r = await forge('POST', '/transfers/interbank/name-enquiry', { body: merge('enquiry', { destination_bank_code: bank_code, account_number }) });
+      const r = await forge('POST', '/transfers/interbank/name-enquiry', { body: merge('enquiry', (({ bank, account }) => ({ destination_bank_code: bank, account_number: account }))(sandboxBeneficiary(bank_code, account_number))) });
       return { enquiry_ref: pick(r, 'name_enquiry_ref', 'reference', 'session_id', 'id'), account_name: pick(r, 'account_name', 'name'), bank_code, account_number, expires_at: pick(r, 'expires_at') };
     } catch (e) {
       const m = `${e.code} ${e.message}`.toLowerCase();
@@ -70,7 +81,8 @@ export const sandboxPayments = {
     const sc = takeScenario('transfer');
     let amt = amount_kobo; if (sc.ending) amt = Math.floor(amt / 100) * 100 + Number(sc.ending);
     const ref = sc.dup ? `DUP-${reference}` : reference;
-    const bank = q.get('SELECT bank_code, bank_account FROM users WHERE id=(SELECT payee_user_id FROM payouts WHERE transfer_group=? LIMIT 1)', reference);
+    const u = q.get('SELECT bank_code, bank_account FROM users WHERE id=(SELECT payee_user_id FROM payouts WHERE transfer_group=? LIMIT 1)', reference);
+    const bank = u ? (({ bank, account }) => ({ bank_code: bank, bank_account: account }))(sandboxBeneficiary(u.bank_code, u.bank_account)) : null;
     const r = await forge('POST', '/transfers/interbank', { idemKey, extraHeaders: sc.outcome ? { 'x-test-outcome': sc.outcome } : undefined, body: merge('transfer', {
       source_account: F.sourceAccount, destination_bank_code: bank?.bank_code, destination_account: bank?.bank_account,
       name_enquiry_ref: enquiry_ref, amount: toNaira(amt), narration: 'SunCredit carbon income', reference: ref,
