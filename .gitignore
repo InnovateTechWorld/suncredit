@@ -9,3 +9,9 @@ data/
 *.log
 .DS_Store
 .build/
+
+# Forge kubeconfig / secrets - never commit
+team03*.yml
+team*.yml
+*.kubeconfig
+kubeconfig*

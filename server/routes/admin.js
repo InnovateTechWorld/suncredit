@@ -119,3 +119,27 @@ router.post('/devices/:id/clear-tamper', wrap((req, res) => {
   audit(req.user, 'device.tamper_cleared', 'device', d.serial, {});
   res.json({ ok: true });
 }));
+
+/* ------------------------------------------------------------------ Forge sandbox (admin only; the whole router is behind the admin login) */
+import * as forgeBridge from '../forge/bridge.js';
+import { CATALOGUE, getScenario, setScenario } from '../forge/scenarios.js';
+import { forge as forgeCall } from '../forge/client.js';
+const needLive = () => { if (!forgeBridge.registryLive()) throw conflict('The registry is in mock mode. Set REGISTRY_MODE=sandbox to use the Forge registry.', 'not_sandbox'); };
+router.get('/forge', wrap((_req, res) => res.json({ ...forgeBridge.status(), scenario: getScenario(), catalogue: CATALOGUE })));
+router.post('/forge/scenario', wrap((req, res) => { setScenario(req.body || {}); res.json({ scenario: getScenario() }); }));
+router.post('/forge/flush', wrap(async (_req, res) => { needLive(); forgeBridge.backfill(); const id = await forgeBridge.flush(); res.json({ submitted_batch: id }); }));
+router.post('/forge/refresh', wrap(async (_req, res) => { needLive(); await forgeBridge.refreshOpen(); res.json({ ok: true }); }));
+router.post('/forge/batches/:id/review', wrap(async (req, res) => {
+  needLive();
+  const d = req.body?.decision; if (!['verified', 'rejected'].includes(d)) throw bad('decision must be verified or rejected.');
+  const b = await forgeBridge.reviewBatch(Number(req.params.id), d, req.body?.reason); audit(req.user, 'forge.review', 'forge_batch', req.params.id, { decision: d }); res.json({ batch: b });
+}));
+router.post('/forge/rebuild', wrap(async (_req, res) => { needLive(); forgeBridge.rebuild(); forgeBridge.backfill(); const id = await forgeBridge.flush(); res.json({ resubmitted_batch: id }); }));
+// Wipes ONLY this team's sandbox state (the guide's POST /admin/reset). Our own data stays; the registry copy is rebuilt.
+router.post('/forge/reset-sandbox', wrap(async (req, res) => {
+  needLive();
+  if (req.body?.confirm !== 'RESET') throw bad('Send {"confirm":"RESET"} to wipe the sandbox state.', 'confirm_required');
+  await forgeCall('POST', '/admin/reset', { body: {} });
+  forgeBridge.rebuild(); audit(req.user, 'forge.reset_sandbox', 'system', null, {});
+  res.json({ ok: true, note: 'Sandbox wiped. Balances are re-seeded by the sandbox; webhooks may need registering again.' });
+}));

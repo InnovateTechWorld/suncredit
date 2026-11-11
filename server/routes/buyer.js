@@ -7,7 +7,7 @@ import { bad, notFound, conflict, parseJson } from '../util.js';
 import { wrap } from './common.js';
 import { stock, createOrder, refreshOrder, validateQuantity } from '../engine/sale.js';
 import { gatewayPay } from '../adapters/mock.js';
-import { adapterMode } from '../adapters/index.js';
+import { adapterMode, paymentsLive, payments } from '../adapters/index.js';
 import { friendly, AdapterError } from '../adapters/errors.js';
 
 export const router = express.Router();
@@ -52,7 +52,8 @@ router.get('/orders/:id', wrap(async (req, res) => {
 router.get('/pay/:ref', wrap((req, res) => {
   const o = q.get('SELECT * FROM orders WHERE payment_ref=? AND buyer_id=?', req.params.ref, req.user.id);
   if (!o) throw notFound('Payment not found.');
-  res.json({ order: orderOut(o), mode: adapterMode() });
+  const fp = paymentsLive() ? q.get('SELECT payment_url FROM forge_payments WHERE ref=?', req.params.ref) : null;
+  res.json({ order: orderOut(o), mode: adapterMode(), payment_url: fp?.payment_url || null, sandbox: paymentsLive() });
 }));
 router.post('/pay/:ref', wrap(async (req, res) => {
   const o = q.get('SELECT * FROM orders WHERE payment_ref=? AND buyer_id=?', req.params.ref, req.user.id);
@@ -60,6 +61,11 @@ router.post('/pay/:ref', wrap(async (req, res) => {
   if (o.status !== 'awaiting_payment') throw conflict('This order is not waiting for payment.', 'not_waiting');
   if (o.reserved_until < new Date().toISOString()) { await refreshOrder(o.id); throw conflict('The reservation expired before payment. Start again from the marketplace.', 'expired'); }
   audit(req.user, 'payment.attempted', 'order', o.id);
+  if (paymentsLive()) {
+    // Sandbox stand-in for card + OTP. The result is never taken from this call: the order page verifies with the provider.
+    await payments.simulate(req.params.ref, ['simulate-transfer', 'simulate-ussd', 'simulate-qr'].includes(req.body?.method) ? req.body.method : 'simulate-transfer');
+    return res.json({ result: 'submitted' });
+  }
   const r = gatewayPay(req.params.ref);
   res.json({ result: r.status });
 }));

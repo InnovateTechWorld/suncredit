@@ -1,0 +1,14 @@
+# Forge sandbox build: one container on 0.0.0.0:8080. Build for the cluster's CPU:
+#   docker build --platform linux/amd64 -f Dockerfile.forge -t <registry>/suncredit:v1 .
+FROM node:24-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY server ./server
+COPY public ./public
+RUN mkdir -p /data && chown -R node:node /app /data
+USER node
+# Adapter modes and every secret come from the Deployment (env + secrets), never from the image.
+ENV NODE_ENV=production PORT=8080 HOST=0.0.0.0 DB_PATH=/data/suncredit.db
+EXPOSE 8080
+CMD ["node", "--disable-warning=ExperimentalWarning", "server/index.js"]

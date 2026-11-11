@@ -9,3 +9,9 @@ worker
 .impeccable
 *.md
 wrangler.jsonc
+team03*.yml
+team*.yml
+*.kubeconfig
+kubeconfig*
+Dockerfile.forge
+k8s

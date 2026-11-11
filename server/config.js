@@ -12,6 +12,22 @@ export const config = {
   dbPath: env.DB_PATH || defaultDbPath(),
   adapterMode: (env.ADAPTER_MODE || 'mock').toLowerCase(), // mock | sandbox
   gatewayKey: env.GATEWAY_KEY || '', // never logged, never stored
+  // Per-interface switches. Each falls back to ADAPTER_MODE, so ADAPTER_MODE=sandbox flips everything and REGISTRY_MODE=mock flips one.
+  registryMode: (env.REGISTRY_MODE || env.ADAPTER_MODE || 'mock').toLowerCase(),
+  paymentsMode: (env.PAYMENTS_MODE || env.ADAPTER_MODE || 'mock').toLowerCase(),
+  datasourceMode: (env.DATASOURCE_MODE || 'csv').toLowerCase(), // csv upload / generator / signed SunBox feed: no Forge equivalent
+  forge: {
+    teamId: env.FORGE_TEAM_ID || 'team03',
+    baseUrl: (env.SANDBOX_BASE_URL || 'http://bank-api.ingress-apisix.svc.cluster.local/v1').replace(/\/$/, ''),
+    merchantId: env.FORGE_MERCHANT_ID || 'mer_900',
+    sourceAccount: env.FORGE_SOURCE_ACCOUNT || '0123456789', // our team account: household payouts are sent from here
+    payoutAccount: env.FORGE_PAYOUT_ACCOUNT || '0123987005', // the ONE account the registry pays 98% to (test account, Zenith)
+    payoutBank: env.FORGE_PAYOUT_BANK || '000015',
+    webhookSecret: env.FORGE_WEBHOOK_SECRET || '', // from the k8s secret forge-webhook, never in code
+    tco2ePerMwh: 0.53, // the registry's own factor; it ignores any CO2 figure we send
+    callsPerMin: num('FORGE_CALLS_PER_MIN', 45), // the shared limit is 60 a minute, AI calls included
+    bodyOverrides: (() => { try { return JSON.parse(env.FORGE_BODY_OVERRIDES || '{}'); } catch { return {}; } })(), // spec-dependent request bodies
+  },
   sessionHours: num('SESSION_HOURS', 8),
   demoLoginHints: env.DEMO_LOGIN_HINTS !== '0',
   seedPassword: env.SEED_PASSWORD || 'SunCredit!2026',

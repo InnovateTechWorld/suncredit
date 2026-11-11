@@ -50,8 +50,8 @@ export async function pay({ root, params, navigate }) {
   mount(root, html`<div class="pay-shell view"><div class="pay-card stack s5"><div class="row between"><b style="font:700 1.1rem var(--font-display)">Secure checkout</b><span class="tag">${icon('lock')}Encrypted</span></div>
     <div><div class="muted" style="font-size:.9rem">You are paying</div><div style="font:700 2.4rem var(--font-display);letter-spacing:-0.03em" class="num">${naira(o.total_kobo)}</div><div class="muted">${o.tonnes} tonne${o.tonnes > 1 ? 's' : ''} of CO₂ credits at ${naira(o.price_kobo)}</div></div>
     <div class="alert" id="cd">${icon('clock')}<div class="grow">Credits held for you for <b class="countdown" id="left" style="font-size:1rem"></b></div></div>
-    <button class="btn sun block" id="go">${icon('lock')}Pay ${naira(o.total_kobo)}</button><div class="alert bad" id="perr" hidden role="alert"></div>
-    <a class="btn quiet block" href="/buyer/orders/${o.id}">Cancel and go back</a><p class="dec-note" style="max-width:none">We confirm every payment directly with the payment provider before any credit is released.</p></div></div>`);
+    <button class="btn sun block" id="go">${icon('lock')}${r.sandbox ? 'Pay by simulated bank transfer ' : 'Pay '}${naira(o.total_kobo)}</button><div class="alert bad" id="perr" hidden role="alert"></div>
+    ${r.sandbox && r.payment_url ? html`<a class="btn ghost block" href="${r.payment_url}" target="_blank" rel="noopener">Open the provider's payment page</a>` : ''}<a class="btn quiet block" href="/buyer/orders/${o.id}">Cancel and go back</a><p class="dec-note" style="max-width:none">We confirm every payment directly with the payment provider before any credit is released.</p></div></div>`);
   const left = $('#left', root);
   const tick = () => { const s = Math.max(0, Math.round((Date.parse(o.reserved_until) - Date.now()) / 1000)); left.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; if (s === 0) { clearInterval(t); $('#go', root).disabled = true; $('#cd', root).classList.add('bad'); left.textContent = '0:00 (expired)'; } };
   tick(); const t = setInterval(tick, 1000);

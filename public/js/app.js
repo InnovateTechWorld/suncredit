@@ -13,7 +13,7 @@ const NAV = {
   owner: [['/owner', 'Overview', 'home'], ['/owner/data', 'Data', 'chart'], ['/owner/fuel', 'Fuel', 'fuel'], ['/owner/claims', 'Claims', 'file'], ['/owner/earnings', 'Earnings', 'wallet']],
   verifier: [['/verifier', 'Queue', 'inbox'], ['/verifier/guide', 'How checks work', 'shield']],
   buyer: [['/buyer', 'Marketplace', 'store'], ['/buyer/orders', 'Orders', 'receipt']],
-  admin: [['/admin', 'Control', 'sliders'], ['/admin/attention', 'Needs attention', 'alert'], ['/admin/audit', 'Audit log', 'list']],
+  admin: [['/admin', 'Control', 'sliders'], ['/admin/attention', 'Needs attention', 'alert'], ['/admin/forge', 'Forge sandbox', 'sliders'], ['/admin/audit', 'Audit log', 'list']],
 };
 const HOME = { owner: '/owner', verifier: '/verifier', buyer: '/buyer', admin: '/admin' };
 const ROLE_LABEL = { owner: 'Site owner', verifier: 'Verifier', buyer: 'Buyer', admin: 'Admin' };
@@ -38,6 +38,7 @@ const ROUTES = [
   { re: /^\/buyer\/orders$/, page: lazy('./pages/buyer.js', 'orders'), role: 'buyer' },
   { re: /^\/buyer\/orders\/(\d+)$/, page: lazy('./pages/buyer.js', 'order'), role: 'buyer', keys: ['id'] },
   { re: /^\/admin$/, page: lazy('./pages/admin.js', 'control'), role: 'admin' },
+  { re: /^\/admin\/forge$/, page: lazy('./pages/admin.js', 'forge'), role: 'admin' },
   { re: /^\/admin\/attention$/, page: lazy('./pages/admin.js', 'attention'), role: 'admin' },
   { re: /^\/admin\/audit$/, page: lazy('./pages/admin.js', 'audit'), role: 'admin' },
 ];

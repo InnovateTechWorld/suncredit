@@ -13,7 +13,8 @@ import { router as verifier } from './routes/verifier.js';
 import { router as buyer } from './routes/buyer.js';
 import { router as admin } from './routes/admin.js';
 import { ingestDeviceBatch } from './engine/device.js';
-import { receiveWebhook, expireReservations, reconcile, runPayouts } from './engine/sale.js';
+import { receiveWebhook, receiveForgeWebhook, expireReservations, reconcile, runPayouts } from './engine/sale.js';
+import * as forgeBridge from './forge/bridge.js';
 import { expireStaleInfoRequests } from './engine/claims.js';
 import { seedIfEmpty } from './seed/seed.js';
 import { autoFeed } from './sunbox/simulator.js';
@@ -45,6 +46,12 @@ app.use((req, res, next) => {
 // Webhooks need the raw body for the signature check, so they are mounted before the JSON parser.
 app.post('/webhooks/payments', express.raw({ type: '*/*', limit: '64kb' }), (req, res) => {
   const r = receiveWebhook(req.body.toString('utf8'), req.headers);
+  res.status(r.status).json(r.body);
+});
+
+// Forge sandbox webhooks (signature verified inside; answers at once, works in the background).
+app.post('/hooks/forge', express.raw({ type: '*/*', limit: '64kb' }), (req, res) => {
+  const r = receiveForgeWebhook(Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '', req.headers);
   res.status(r.status).json(r.body);
 });
 
@@ -107,7 +114,7 @@ if (!IS_WORKERS) {
   app.use('/fonts/figtree', express.static(path.join(__dirname, '..', 'node_modules/@fontsource-variable/figtree/files'), { maxAge: '7d' }));
   app.use('/fonts/plex', express.static(path.join(__dirname, '..', 'node_modules/@fontsource/ibm-plex-mono/files'), { maxAge: '7d' }));
   app.use(express.static(pub, { maxAge: 0, etag: true }));
-  app.get(/^\/(?!api|webhooks|device|healthz).*/, (_req, res) => res.sendFile(path.join(pub, 'index.html')));
+  app.get(/^\/(?!api|webhooks|hooks|device|healthz).*/, (_req, res) => res.sendFile(path.join(pub, 'index.html')));
 }
 
 app.use((err, req, res, _next) => {
@@ -121,11 +128,12 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: 'internal', message: 'Something went wrong on our side. Please try again.' });
 });
 
-let lastFeed = 0, lastTick = 0;
+let lastFeed = 0, lastTick = 0, lastForge = 0;
 function tick() {
   lastTick = Date.now();
   if (getSetting('sunbox.auto', '0') === '1' && Date.now() - lastFeed > 55000) { lastFeed = Date.now(); autoFeed().catch(() => {}); }
   try { expireReservations(); expireStaleInfoRequests(); } catch (e) { console.error('[tick]', e.message); }
+  if (forgeBridge.registryLive() && Date.now() - lastForge > 30000) { lastForge = Date.now(); forgeBridge.backfill(); forgeBridge.flush().catch((e) => console.error('[forge] flush:', e.code || e.message)); forgeBridge.refreshOpen().catch(() => {}); }
   runPayouts().catch(() => {});
 }
 

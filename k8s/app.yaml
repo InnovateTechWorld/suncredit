@@ -1,0 +1,40 @@
+# SunCredit on the Forge Kubernetes space (namespace team03). Set the image tag with:
+#   kubectl set image deployment/app app=<registry>/suncredit:v1
+# Secrets (never in git): huawei-gateway (GATEWAY_KEY, provided), forge-webhook (FORGE_WEBHOOK_SECRET, created after registering the webhook),
+# app-secrets (optional: SEED_PASSWORD, DEVICE_MASTER_KEY). Roll back with: kubectl rollout undo deployment/app
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: app }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # one pod: the in-memory/SQLite state is per pod, and the quota is tight
+  selector: { matchLabels: { app: app } }
+  template:
+    metadata: { labels: { app: app } }
+    spec:
+      # imagePullSecrets: [{ name: regcred }]   # only if the image is private: kubectl create secret docker-registry regcred ...
+      securityContext: { fsGroup: 1000 }
+      containers:
+        - name: app
+          image: REGISTRY/suncredit:v1
+          ports: [{ containerPort: 8080 }]
+          env:
+            - { name: ADAPTER_MODE, value: sandbox }
+            - { name: FORGE_TEAM_ID, value: team03 }
+            - { name: DEMO_LOGIN_HINTS, value: "1" }
+            - { name: DB_PATH, value: /data/suncredit.db }   # emptyDir: re-seeds on every start (no storage class confirmed)
+          envFrom:
+            - secretRef: { name: huawei-gateway, optional: true }
+            - secretRef: { name: forge-webhook, optional: true }
+            - secretRef: { name: app-secrets, optional: true }
+          readinessProbe: { httpGet: { path: /healthz, port: 8080 }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
+          volumeMounts: [{ name: data, mountPath: /data }]
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: app }
+spec:
+  selector: { app: app }
+  ports: [{ port: 80, targetPort: 8080 }]

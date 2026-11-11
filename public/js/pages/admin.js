@@ -85,3 +85,28 @@ export async function audit({ root }) {
   draw();
   $('#flt', root).addEventListener('input', (e) => { filter = e.target.value.trim().toLowerCase(); draw(); });
 }
+
+/* ---------------------------------------------------------------- Forge sandbox */
+export async function forge({ root }) {
+  setTitle('Forge sandbox');
+  const draw = async () => {
+    const f = await get('/admin/forge');
+    const sc = f.scenario;
+    mount(root, html`<div class="stack s6 view"><div class="page-head"><div><h1>Forge sandbox</h1><p>Registry, payments and webhooks for team ${esc(f.team)}. SunCredit's own database stays the source of truth; the registry holds a rebuildable copy.</p></div><div class="row wrap"><span class="tag ${f.registry_mode === 'sandbox' ? 'ok' : 'sun'}">Registry: ${f.registry_mode}</span><span class="tag ${f.payments_mode === 'sandbox' ? 'ok' : 'sun'}">Payments: ${f.payments_mode}</span><span class="tag">Data: ${esc(f.datasource_mode)}</span><span class="tag ${f.webhook_secret_set ? 'ok' : 'bad'}">Webhook secret ${f.webhook_secret_set ? 'set' : 'missing'}</span></div></div>
+      <section class="panel stack s3"><h2>Pooled measurement</h2><dl class="kv"><dt>Waiting to submit</dt><dd>${f.pool.pending_kwh} kWh from ${f.pool.claims} claim(s), about ${(f.pool.pending_app_kg / 1000).toFixed(3)} t on our own estimate</dd><dt>One credit needs</dt><dd>${f.pool.kwh_per_credit} kWh (registry factor ${f.factor_tco2e_per_mwh} tCO2e per MWh)</dd><dt>Sellable now</dt><dd>${f.capacity_tonnes ?? 'n/a (mock)'} tonne(s) the registry has verified</dd><dt>Registry project</dt><dd class="mono">${esc(f.project_id || 'not created yet')}</dd><dt>API calls, last minute</dt><dd>${f.calls_last_minute} of 60 shared</dd></dl>
+        <div class="row wrap"><button class="btn ghost" id="flush">${icon('arrow')}Submit pool now</button><button class="btn ghost" id="refresh">${icon('refresh')}Refresh registry status</button><button class="btn ghost" id="rebuild">${icon('refresh')}Rebuild registry copy</button><button class="btn danger" id="wipe">Reset sandbox (own team)</button></div>${f.last_error?.message ? html`<div class="alert bad"><div class="grow">Last sandbox error: ${esc(f.last_error.message)}</div></div>` : ''}<p class="dec-note" style="max-width:none">${esc(f.note_fee)}</p></section>
+      <section class="panel stack s3"><h2>Registry batches: our estimate and the registry's</h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th>#</th><th>Status</th><th class="r">kWh sent</th><th class="r">Our estimate (t)</th><th class="r">Registry (tCO2e)</th><th class="r">Credits</th><th></th></tr></thead><tbody>${f.batches.map((b) => html`<tr><td>${b.id}</td><td><span class="tag">${esc(b.status)}</span></td><td class="r">${b.kwh}</td><td class="r">${b.app_tonnes}</td><td class="r">${b.est_tco2e ?? '—'}</td><td class="r">${b.credits_issued ?? '—'} (${b.credits_remaining ?? '—'} left)</td><td>${b.status === 'submitted' ? html`<button class="btn quiet sm" data-rv="${b.id}:verified">Verify</button> <button class="btn quiet sm" data-rv="${b.id}:rejected">Reject</button>` : esc(b.note || '')}</td></tr>`)}</tbody></table></div></section>
+      <section class="panel stack s5"><h2>Demo scenarios (apply to the next call, once)</h2>
+        <div class="scn"><b>Forced outcome (x-test-outcome)</b><div class="seg" role="group">${['', 'successful', 'failed', 'pending', 'timeout', 'reversed'].map((v) => html`<button data-o="${v}" aria-pressed="${sc.outcome === v}">${v || 'none'}</button>`)}</div></div>
+        <div class="scn"><b>Transfer amount ending</b><div class="seg" role="group">${[['', 'none'], ...Object.entries(f.catalogue.amount_endings).map(([k, t]) => [k, `.${k} ${t}`])].map(([v, t]) => html`<button data-e="${v}" aria-pressed="${sc.ending === v}">${esc(t)}</button>`)}</div></div>
+        <div class="scn"><b>Duplicate reference (DUP-)</b><div class="seg" role="group"><button data-d="0" aria-pressed="${!sc.dup}">off</button><button data-d="1" aria-pressed="${sc.dup}">on</button></div></div>
+        <p class="dec-note" style="max-width:none">Reject path: use Reject on a submitted batch above. ${esc(f.catalogue.reset)}</p></section>
+      <section class="panel stack s3"><h2>Webhooks received</h2><div class="list">${f.webhook_events.length ? f.webhook_events.map((e) => html`<div class="item"><div><div class="t"><span class="code">${esc(e.type)}</span></div><div class="m">${e.processed ? 'processed' : e.error ? esc(e.error) : 'processing'}</div></div><span class="m">${ago(e.received_at)}</span></div>`) : html`<p class="muted">None yet.</p>`}</div></section></div>`);
+    const act = (sel, fn) => $$(sel, root).forEach((b) => b.addEventListener('click', async () => { try { await fn(b); draw(); } catch (e) { toast(e.message, 'bad'); } }));
+    act('#flush', () => post('/admin/forge/flush')); act('#refresh', () => post('/admin/forge/refresh')); act('#rebuild', () => post('/admin/forge/rebuild'));
+    act('#wipe', async () => { if (window.confirm('Wipe this team sandbox state? SunCredit data is kept and the registry copy is rebuilt.')) await post('/admin/forge/reset-sandbox', { confirm: 'RESET' }); });
+    act('[data-rv]', (b) => { const [id, d] = b.dataset.rv.split(':'); return post(`/admin/forge/batches/${id}/review`, d === 'rejected' ? { decision: d, reason: 'Rejected in the demo.' } : { decision: d }); });
+    act('[data-o]', (b) => post('/admin/forge/scenario', { outcome: b.dataset.o })); act('[data-e]', (b) => post('/admin/forge/scenario', { ending: b.dataset.e })); act('[data-d]', (b) => post('/admin/forge/scenario', { dup: b.dataset.d === '1' }));
+  };
+  await draw();
+}

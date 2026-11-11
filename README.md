@@ -123,3 +123,68 @@ Admin → Control: force the next payment to succeed, fail, time out, reverse, u
 ## Not built (planned)
 
 Real BVN/NIN checks, real registry listing, satellite or weather feeds, a grid emission factor, mobile apps, multi-currency, and the physical SunBox firmware (the endpoint and simulator are built).
+
+## Forge sandbox version (branch `forge-sandbox`)
+
+A separate build for the Forge hackathon sandbox (Team SunCredit, `team03`). The normal build is unchanged: with no extra env vars everything runs on the mocks, the Cloudflare Worker still works, and `npm start` still serves port 3000.
+
+### Adapter modes
+
+Each external system sits behind an adapter with a mock and a sandbox implementation (`server/adapters/`).
+
+| Interface | Switch | Mock | Sandbox |
+|---|---|---|---|
+| `registry` (project, measurement, review, retire, certificate) | `REGISTRY_MODE` | local, 60 s-style behaviour, same errors | Forge `/carbon/*` through `server/forge/bridge.js` |
+| `payments` (checkout, verify, name enquiry, transfer, requery) | `PAYMENTS_MODE` | local gateway and signed webhooks | Forge `/payments/*`, `/transfers/interbank/*` |
+| `datasource` (readings) | `DATASOURCE_MODE=csv` | CSV upload, generator, signed SunBox simulator | no Forge equivalent |
+
+`ADAPTER_MODE=mock|sandbox` sets both money interfaces at once; `REGISTRY_MODE` / `PAYMENTS_MODE` override one. `/healthz` reports the active mode.
+
+### How the app maps onto the sandbox carbon flow
+
+1. SunCredit's own database stays the source of truth (sites, readings, flags, claims, pooled leftovers, orders, payouts). The registry holds a rebuildable copy.
+2. A site owner submits a claim. SunCredit's verifier approves it first, so SunCredit's fraud checks stay in charge.
+3. Approved kWh joins a pool. When the pool holds at least one whole credit's worth (1 tCO2e = about 1887 kWh at the registry's 0.53 tCO2e/MWh), ONE measurement for ONE pooled registry project is submitted. Leftover kWh stays in our database for the next submission.
+4. The registry verifies it (automatically after 60 s, or by a reviewer, or from the admin page) and issues whole-tonne credits. The registry computes CO2 itself and ignores ours, so the admin page shows both numbers side by side.
+5. Only credits the registry has verified can be sold. The buyer pays through the Forge checkout; SunCredit verifies the payment with the provider (never trusts the browser or a webhook body), then retires the quantity against one verified batch, one payment per retirement, no resale.
+6. The registry pays 98% to the project's single payout account and keeps its fee. The fee is read from the retirement response, never hard-coded. It is taken out of the platform's share, so the owner/verifier 70/10 split is unchanged. Household and owner payouts are interbank transfers (name enquiry, then transfer) with an Idempotency-Key stored before sending; a 504 is never resent, it is requeried.
+7. Webhooks (`POST /hooks/forge`) are verified (HMAC-SHA256 over `timestamp.rawBody`, 300 s tolerance, constant-time compare), de-duplicated on `event_id`, answered at once and processed in the background. Money is always confirmed by an API call, never from a webhook body.
+
+The Forge API key comes only from the environment variable `GATEWAY_KEY` (Kubernetes secret `huawei-gateway`), and the webhook secret from `FORGE_WEBHOOK_SECRET` (secret `forge-webhook`). Neither is in code, in the image or in git. `team03*.yml` (the kubeconfig) is git- and docker-ignored.
+
+Request bodies follow the organisers' guide; the official spec PDF was not available. If the sandbox rejects a body, the error appears on the admin Forge page and in the logs (with `request_id`). Adjust it without a rebuild using `FORGE_BODY_OVERRIDES`, for example `{"project":{"country":"NG"},"retire":{"buyer":{"name":"X","type":"corporate"}}}` (keys: project, measurement, checkout, retire, enquiry, transfer). Account and bank defaults (`FORGE_SOURCE_ACCOUNT`, `FORGE_PAYOUT_ACCOUNT`, `FORGE_PAYOUT_BANK`, `FORGE_MERCHANT_ID`) are env vars too.
+
+### Demo scenarios (admin sign-in, `/admin/forge`)
+
+Forced outcome header `x-test-outcome` (successful, failed, pending, timeout, reversed), transfer amount endings (.01 insufficient funds, .02 timeout then reversed, .03 pending 2 min, .04 reversed after about 60 s, .05 withholds the first webhook), a `DUP-` reference for the duplicate error, Reject on a registry batch for the reject path, and a guarded reset of this team's sandbox state. Everything on that page is behind the admin login.
+
+### Deploy to the Forge Kubernetes space
+
+```bash
+export KUBECONFIG=/path/to/team03.yml          # never commit it
+docker build --platform linux/amd64 -f Dockerfile.forge -t <registry>/suncredit:v1 .
+docker push <registry>/suncredit:v1             # tag releases v1, v2... never latest
+sed 's#REGISTRY/suncredit:v1#<registry>/suncredit:v1#' k8s/app.yaml | kubectl apply -f -
+kubectl rollout status deployment/app
+curl -I https://team03.xtradot.co               # expect 200
+kubectl logs deploy/app
+```
+
+One container on 0.0.0.0:8080, `/healthz` for readiness, Service `app` 80 to 8080. Data lives in an `emptyDir` and re-seeds on every start: no storage class has been confirmed, so durable storage is not set up (ask the "Technical Support" Telegram group if you want it).
+
+Register the webhook once (from inside the cluster; the secret is shown only once and goes straight into a Kubernetes secret):
+
+```bash
+SECRET=$(kubectl exec deploy/app -- node server/forge/register-webhook.js)
+kubectl create secret generic forge-webhook --from-literal=FORGE_WEBHOOK_SECRET="$SECRET"; unset SECRET
+kubectl rollout restart deployment/app
+```
+
+Roll forward / back:
+
+```bash
+kubectl set image deployment/app app=<registry>/suncredit:v2
+kubectl rollout undo deployment/app
+```
+
+Troubleshooting: `ImagePullBackOff` means a wrong or private image (create `regcred`, uncomment `imagePullSecrets`); `exec format error` means an ARM image (rebuild with `--platform linux/amd64`); 502/503 means the Service is not `app`, the port is wrong or `/healthz` fails (`kubectl get svc,endpoints app`); calls that time out from a laptop must run inside the cluster; 429 means back off (the client already limits itself to 45 calls a minute). Sandbox balances reset when the sandbox restarts: use Rebuild on the admin Forge page. Keys get revoked after the event, so export anything you need before then.

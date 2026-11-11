@@ -5,16 +5,20 @@ import { payments, registry, AdapterError } from '../adapters/index.js';
 import { friendly } from '../adapters/errors.js';
 import { setWebhookSink } from '../adapters/mock.js';
 import { bad, conflict, notFound, rid, splitProportional, parseJson } from '../util.js';
+import { pick, toKobo } from '../forge/client.js';
 import { notify } from './claims.js';
+import { capacity, refreshOpen } from '../forge/bridge.js';
 
 const iso = (ms) => new Date(ms).toISOString();
 
 /* ------------------------------------------------------------------ stock */
 export function stock() {
   const rows = q.all("SELECT origin_month, region, price_kobo, COUNT(*) n FROM credits WHERE status='issued' AND order_id IS NULL AND admin_flag IS NULL GROUP BY origin_month, region, price_kobo ORDER BY origin_month DESC, region");
-  return { groups: rows, total: rows.reduce((a, r) => a + r.n, 0), price_kobo: config.sale.priceKobo };
+  const cap = capacity(); // sandbox registry: only credits the registry has verified can be sold
+  const local = rows.reduce((a, r) => a + r.n, 0);
+  return { groups: rows, total: Math.min(local, cap), local_total: local, registry_cap: Number.isFinite(cap) ? cap : null, price_kobo: config.sale.priceKobo };
 }
-const available = () => q.get("SELECT COUNT(*) n FROM credits WHERE status='issued' AND order_id IS NULL AND admin_flag IS NULL").n;
+const available = () => Math.min(q.get("SELECT COUNT(*) n FROM credits WHERE status='issued' AND order_id IS NULL AND admin_flag IS NULL").n, capacity());
 
 /* ------------------------------------------------------------------ orders */
 export function validateQuantity(raw) {
@@ -131,7 +135,7 @@ export async function finishOrder(orderId) {
     if (!o || o.status !== 'paid') return;
     const serials = q.all('SELECT serial FROM credits WHERE order_id=? ORDER BY id', orderId).map((r) => r.serial);
     const buyer = q.get('SELECT id,name FROM users WHERE id=?', o.buyer_id);
-    const ret = await registry.retire(serials, buyer, `order-${orderId}`);
+    const ret = await registry.retire(serials, buyer, `order-${orderId}`, { orderId, tonnes: o.tonnes, priceKobo: o.price_kobo, totalKobo: o.total_kobo, paymentRef: o.payment_ref });
     tx(() => {
       const cur = q.get('SELECT status FROM orders WHERE id=?', orderId);
       if (cur.status !== 'paid') return;
@@ -227,7 +231,10 @@ async function payOutUser(uid) {
   tx(() => { for (const r of rows) q.run("UPDATE payouts SET status='processing', transfer_group=?, resolved_name=?, attempts=attempts+1, updated_at=? WHERE id=?", group, enq.account_name, nowIso(), r.id); });
   try {
     const t = await paced(() => payments.transfer({ enquiry_ref: enq.enquiry_ref, amount_kobo: total, reference: group }, group));
-    settleGroup(group, t);
+    if (t.status === 'pending') {
+      // Interbank transfers settle after a few seconds. Wait for the webhook or the requery; never resend.
+      tx(() => q.run("UPDATE payouts SET status='pending_confirmation', note='Sent. Waiting for the bank to confirm.', updated_at=? WHERE transfer_group=?", nowIso(), group));
+    } else settleGroup(group, t);
   } catch (e) {
     if (e instanceof AdapterError && e.code === 'timeout') {
       // A timeout means the money may have moved. Never resend: query until the status is final.
@@ -310,6 +317,54 @@ export function receiveWebhook(rawBody, headers) {
 }
 
 setWebhookSink((raw, headers) => receiveWebhook(raw, headers));
+
+// Forge sandbox webhooks. Headers x-forge-event / x-forge-timestamp / x-forge-signature; HMAC-SHA256 over `${timestamp}.${rawBody}`.
+// Verified, de-duplicated on event_id, answered at once, processed in the background. Bodies are only hints: money is confirmed by API.
+export function verifyForgeWebhook(rawBody, headers) {
+  const secret = config.forge.webhookSecret;
+  if (!secret) return { ok: false, status: 503, reason: 'webhook_secret_not_configured' };
+  const tsRaw = String(headers['x-forge-timestamp'] || ''); const sig = String(headers['x-forge-signature'] || '');
+  if (!tsRaw || !sig) return { ok: false, status: 401, reason: 'missing_signature' };
+  const t = Number(tsRaw); const ms = t > 1e12 ? t : t * 1000; // seconds or milliseconds
+  if (!Number.isFinite(ms) || Math.abs(Date.now() - ms) > config.webhookToleranceSec * 1000) return { ok: false, status: 400, reason: 'stale_timestamp' };
+  const expected = Buffer.from('sha256=' + crypto.createHmac('sha256', secret).update(`${tsRaw}.${rawBody}`).digest('hex'));
+  const got = Buffer.from(sig);
+  if (expected.length !== got.length || !crypto.timingSafeEqual(expected, got)) return { ok: false, status: 401, reason: 'bad_signature' };
+  return { ok: true };
+}
+export function receiveForgeWebhook(rawBody, headers) {
+  const v = verifyForgeWebhook(rawBody, headers);
+  if (!v.ok) return { status: v.status, body: { error: v.reason } };
+  let ev; try { ev = JSON.parse(rawBody); } catch { return { status: 400, body: { error: 'bad_json' } }; }
+  const id = ev.event_id || ev.id; const type = String(headers['x-forge-event'] || ev.event || ev.type || '');
+  if (!id || !type) return { status: 400, body: { error: 'bad_event' } };
+  const key = `fg:${id}`;
+  try { q.run('INSERT INTO webhook_events(event_id,type,payload) VALUES(?,?,?)', key, type, rawBody); }
+  catch { return { status: 200, body: { received: true, duplicate: true } }; }
+  setImmediate(() => processForge(key, type, ev.data || ev).catch((e) => q.run('UPDATE webhook_events SET error=? WHERE event_id=?', String(e.message).slice(0, 200), key)));
+  return { status: 200, body: { received: true } };
+}
+async function processForge(key, type, data) {
+  const ref = pick(data, 'reference', 'payment_reference', 'transfer_reference');
+  if (type === 'payment.successful' || type.startsWith('payment.')) {
+    const o = ref && q.get('SELECT id FROM orders WHERE payment_ref=?', ref);
+    if (o) await refreshOrder(o.id, { force: true });
+  } else if (type === 'carbon.mrv.verified' || type === 'carbon.mrv.rejected') {
+    await refreshOpen();
+  } else if (type === 'carbon.credits.retired') {
+    // The retire call already answered; the event can carry the final fee. Nothing is released on this alone.
+    const fee = toKobo(pick(data, 'fee', 'platform_fee', 'registry_fee'));
+    const rid = pick(data, 'retirement_id', 'id');
+    if (rid && fee != null) q.run('UPDATE forge_retirements SET registry_fee_kobo=? WHERE retirement_id=? AND registry_fee_kobo IS NULL', fee, rid);
+  } else if (type.startsWith('transfer.')) {
+    if (ref && q.get('SELECT 1 x FROM payouts WHERE transfer_group=?', ref)) {
+      if (type === 'transfer.reversed') settleGroup(ref, { status: 'reversed' });
+      else { const r = await payments.requery(ref); if (r.status !== 'pending') settleGroup(ref, r); } // success and failure are confirmed by requery
+    }
+    // transfers with another reference are the registry's own payout to our project account: nothing to do.
+  }
+  q.run('UPDATE webhook_events SET processed=1 WHERE event_id=?', key);
+}
 
 async function processWebhook(ev) {
   if (ev.type.startsWith('charge.')) {

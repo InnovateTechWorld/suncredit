@@ -10,7 +10,7 @@ import { gatewayPay } from '../adapters/mock.js';
 import { currentWatMonth, prevMonth, monthBounds, prng, hashStr } from '../util.js';
 
 const H = 3600_000;
-const WIPE = ['grid_purchases', 'device_events', 'device_batches', 'reviews', 'claim_messages', 'claim_locks', 'claim_flags', 'credit_allocations', 'payouts', 'certificates', 'orders', 'credits', 'pending_entries', 'pool_batches',
+const WIPE = ['forge_pool', 'forge_batches', 'forge_payments', 'forge_retirements', 'grid_purchases', 'device_events', 'device_batches', 'reviews', 'claim_messages', 'claim_locks', 'claim_flags', 'credit_allocations', 'payouts', 'certificates', 'orders', 'credits', 'pending_entries', 'pool_batches',
   'claims', 'readings', 'upload_batches', 'fuel_records', 'devices', 'baseline_history', 'site_config_history', 'sites', 'notifications', 'webhook_events', 'mock_registry', 'mock_payments', 'settings', 'users'];
 
 const USERS = [
@@ -188,12 +188,15 @@ export async function reseed({ keepSession } = {}) {
     }
 
     // one completed sale, so earnings, certificates and payouts have real history
-    const buyer = q.get("SELECT * FROM users WHERE email='buyer1@suncredit.test'");
-    const order = await createOrder(buyer, 3, 'seed-order-0001');
-    gatewayPay(order.payment_ref);
-    await applyPayment(order.id, await payments.verifyPayment(order.payment_ref));
-    await runPayouts();
-    await runPayouts();
+    // Skipped when either provider is the Forge sandbox: that history would have to be real sandbox payments and retirements.
+    if (config.registryMode !== 'sandbox' && config.paymentsMode !== 'sandbox') {
+      const buyer = q.get("SELECT * FROM users WHERE email='buyer1@suncredit.test'");
+      const order = await createOrder(buyer, 3, 'seed-order-0001');
+      gatewayPay(order.payment_ref);
+      await applyPayment(order.id, await payments.verifyPayment(order.payment_ref));
+      await runPayouts();
+      await runPayouts();
+    }
 
     const stats = { ms: Date.now() - t0, months: [A, B], claims: results, credits: q.get('SELECT COUNT(*) n FROM credits').n, readings: q.get('SELECT COUNT(*) n FROM readings').n };
     return stats;
