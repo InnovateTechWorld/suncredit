@@ -12,9 +12,11 @@ export default async function login({ root, query, navigate, store }) {
   let cfg = { login_hints: [], hint_password: null };
   try { cfg = await get('/public/config'); } catch { /* login still works */ }
   const hints = cfg.login_hints || [];
-  const groups = ROLES.map(([role, title, desc]) => ({ role, title, desc, people: hints.filter((h) => h.role === role) })).filter((g) => g.people.length);
-  const label = (h) => html`${h.name}${h.role === 'owner' && h.source ? html` <span class="tag ${h.source === 'sunbox' ? 'ok' : ''}" style="min-height:20px;padding:0 7px;margin-left:4px">${h.source === 'sunbox' ? 'SunBox' : h.source === 'inverter' ? 'Inverter' : 'CSV'}</span>` : ''}`;
-  mount(root, html`<div class="login-wrap view">
+  // One owner per data source (SunBox, inverter, CSV); the other roles are listed as they are.
+  const ownerPick = ['sunbox', 'inverter', 'upload'].map((src) => hints.find((h) => h.role === 'owner' && h.source === src)).filter(Boolean);
+  const groups = ROLES.map(([role, title, desc]) => ({ role, title, desc, people: role === 'owner' ? ownerPick : hints.filter((h) => h.role === role) })).filter((g) => g.people.length);
+  const label = (h) => html`${h.name}`;
+  mount(root, html`<div class="login-wrap login-fit view">
     <section class="login-art"><a class="brand" href="/" style="color:var(--paper)">${brandMark}SunCredit</a>
       <div style="position:relative;z-index:1" class="stack s3"><h1>Every sunny hour that replaces a generator, on the record.</h1><p>Send your energy and fuel records. A verifier checks them. Buyers retire the credits. You get paid your share.</p></div>
       <div style="position:absolute;right:-60px;bottom:-40px;width:420px;opacity:.5;pointer-events:none">${sparkArc}</div></section>
@@ -25,8 +27,8 @@ export default async function login({ root, query, navigate, store }) {
         <div class="alert bad" id="formerr" role="alert" hidden></div>
         <button class="btn block" type="submit">Sign in</button></form>
       ${groups.length ? html`<div class="stack s4"><div class="muted" style="font-size:.9rem;font-weight:650">Or pick an account to sign in as. It fills the form for you.</div>
-        ${groups.map((g) => html`<div class="role-group"><h3>${g.title}</h3><p>${g.desc}</p><div class="hint-list">${g.people.map((h) => html`<button type="button" class="chip-btn" data-email="${h.email}">${label(h)}</button>`)}</div></div>`)}</div>` : ''}
-      <p class="muted" style="font-size:.88rem">Owners marked <b>SunBox</b> already have a box sending readings. Owners marked <b>CSV</b> upload files and can connect a box from their Data page.</p><p class="muted" style="font-size:.9rem">Looking up a certificate? <a href="/verify">No sign-in needed.</a></p></section></div>`);
+        ${groups.map((g) => html`<div class="role-group"><h3>${g.title}</h3><div class="hint-list">${g.people.map((h) => html`<button type="button" class="chip-btn" data-email="${h.email}">${label(h)}</button>`)}</div></div>`)}</div>` : ''}
+      <p class="muted" style="font-size:.9rem">Looking up a certificate? <a href="/verify">No sign-in needed.</a></p></section></div>`);
   const f = $('#f', root);
   const err = $('#formerr', root);
   const setErr = (m) => { err.hidden = !m; err.innerHTML = m ? `${icon('alert')}<div class="grow">${esc(m)}</div>` : ''; };
