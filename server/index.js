@@ -19,6 +19,7 @@ import { expireStaleInfoRequests } from './engine/claims.js';
 import { seedIfEmpty } from './seed/seed.js';
 import { autoFeed } from './sunbox/simulator.js';
 import { getSetting } from './db.js';
+import { buildVersionedIndex } from './assets.js';
 
 const IS_WORKERS = globalThis.__SC_RUNTIME__ === 'workers'; // Workers have no disk: static files come from the assets binding
 const __dirname = IS_WORKERS ? '/' : path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,7 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
 let ready = false;
+let importMapHash = ''; // set once the versioned index is built (Node build only)
 const started = Date.now();
 
 app.get('/healthz', (_req, res) => {
@@ -38,7 +40,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'");
+  res.setHeader('Content-Security-Policy', `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'${importMapHash ? ' ' + importMapHash : ''}; connect-src 'self'; frame-ancestors 'none'`);
   if (!ready && !req.path.startsWith('/healthz')) return res.status(503).json({ error: 'starting', message: 'SunCredit is starting up. Try again in a moment.' });
   next();
 });
@@ -116,8 +118,12 @@ if (!IS_WORKERS) {
   // Pages, scripts and styles must never be served stale: a proxy or browser that keeps an old
   // copy would show people the previous version after a deploy.
   const noStore = (res) => res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-  app.use(express.static(pub, { maxAge: 0, etag: true, setHeaders: (res, file) => { if (/\.(?:html|js|css)$/i.test(file)) noStore(res); } }));
-  app.get(/^\/(?!api|webhooks|hooks|device|healthz).*/, (_req, res) => { noStore(res); res.sendFile(path.join(pub, 'index.html')); });
+  const index = buildVersionedIndex(pub); // every script/style URL carries a content hash, so deploys can never show old code
+  importMapHash = index.cspHash;
+  const sendIndex = (_req, res) => { noStore(res); res.type('html').send(index.html); };
+  app.get('/', sendIndex);
+  app.use(express.static(pub, { index: false, maxAge: 0, etag: true, setHeaders: (res, file) => { if (/\.(?:html|js|css)$/i.test(file)) noStore(res); } }));
+  app.get(/^\/(?!api|webhooks|hooks|device|healthz).*/, sendIndex);
 }
 
 app.use((err, req, res, _next) => {
