@@ -82,7 +82,7 @@ app.post('/api/auth/logout', (req, res) => { if (req.sessionHash) q.run('DELETE 
 app.get('/api/auth/me', (req, res) => res.json({ user: req.user ? userOut(req.user) : null }));
 app.get('/api/public/config', (_req, res) => {
   const hints = config.demoLoginHints ? q.all("SELECT name,email,role,(SELECT data_source FROM sites WHERE owner_id=users.id ORDER BY id LIMIT 1) AS source FROM users ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'verifier' THEN 1 WHEN 'buyer' THEN 2 ELSE 3 END, id") : [];
-  res.json({ login_hints: hints, hint_password: config.demoLoginHints ? config.seedPassword : null, tz: config.tz, banks: BANKS });
+  res.json({ login_hints: hints, hint_password: config.demoLoginHints ? config.seedPassword : null, tz: config.tz, banks: BANKS, split: config.split });
 });
 
 app.get('/api/public/stats', (_req, res) => {
